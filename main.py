@@ -1,6 +1,9 @@
+# TB TODO - List possible words based on the intersection of across + down instead of just one facing
+# TB TODO - Try filling out multiple lines automatically
 from blessed import Terminal
 import puz
 import sys
+import re
 
 term = Terminal()
 #print( 'I am ' + term.underline + 'bold' + term.normal + '!' )
@@ -18,6 +21,60 @@ for row in range(crossword_size[1]):
 DRAW_CROSSWORD_START = (2,2)
 across_word_starts = {}
 down_word_starts = {}
+big_word_list = {}
+big_words = ""
+
+# needle = "ABC  XT" where space is missing letter that could be anything
+def find_matching_words(needle):
+    MAX_SUGGESTIONS = 20
+
+    # Current word could be none if you're located on a black square
+    if needle is None:
+        return []
+
+    builder = []
+    for c in needle:
+        if c == ' ':
+            builder.append('[A-Z0-9]')
+        else:
+            builder.append(c)
+    builder.append(';[0-9]+')
+    reg = ''.join(builder)
+
+    #reg = r"ANGELI[A-Z];[0-9]+"
+    #reg = r"OPEN[A-Z][A-Z][A-Z][A-Z];[0-9]+"
+    all_matches = re.findall(reg, big_words)
+    result = []
+    for a in all_matches:
+        word, score = a.split(';')
+        result.append((word,int(score)))
+    result.sort(key=lambda x: -x[1])
+
+    if len(result) > MAX_SUGGESTIONS: 
+        result = result[:MAX_SUGGESTIONS]
+        result.append(('(more)',0))
+    return result
+
+
+# TB TODO - Would be nice to load async
+def load_big_word_list():
+    """
+    with open('words.txt') as f:
+        for line in f.read().splitlines():
+            # print(line)
+            word, score = line.split(';')
+            if len(word) not in big_word_list:
+                big_word_list[len(word)] = []
+            big_word_list[len(word)].append((word,score))
+    print(len(big_word_list))
+    exit()
+    """
+    # Faster to just do a regex on everything?
+    # Could still separate it by word length, but just do a big chunk of data
+    global big_words
+    with open('words.txt') as f:
+        big_words = f.read()
+    # find_matching_words('ANGELI ')
 
 def find_word_starts():
     across_word_starts.clear()
@@ -41,6 +98,18 @@ def find_word_starts():
             else:
                 down_word_starts[(x,y)] = word_y
 
+
+def print_word_suggestions( current_word ):
+    x = DRAW_CROSSWORD_START[0] + puz_data.width * 4 + 5
+    y = DRAW_CROSSWORD_START[1]
+    print(term.blue_on_black)
+    #print(term.move_xy(x,y), end='') 
+    #print(current_word, end='')
+    #print('wtfffffff', end='')
+    for sugg in find_matching_words(current_word):
+        print(term.move_xy(x,y), end='') 
+        print(f"{sugg[0]}     {sugg[1]}", end='')
+        y+=1
 
 def update_cursor(pos):
     x = pos[0]*4 + DRAW_CROSSWORD_START[0] + 2
@@ -163,6 +232,32 @@ def print_facing(pos,facing,color):
             else:
                 print_box(pos[0],y,color)
 
+def get_current_word(pos,facing):
+    ch = puz_data.solution[pos[1]*puz_data.height + pos[0]]
+    if ch == '.':
+        return None
+
+    word_builder = []
+    if facing == FACING_ACROSS: 
+        for x in range( across_word_starts[pos], puz_data.width ):
+            ch = puz_data.solution[pos[1]*puz_data.height + x]
+            if ch == '.':
+                break
+            else:
+                word_builder.append(ch)
+
+    elif facing == FACING_DOWN:
+        for y in range( down_word_starts[pos], puz_data.height ):
+            ch = puz_data.solution[y*puz_data.height + pos[0]]
+            if ch == '.':
+                break
+            else:
+                word_builder.append(ch)
+
+    result = ''.join(word_builder)
+    return(result)
+
+
 
 def print_title(pos):
     print(term.home + term.clear)
@@ -170,9 +265,9 @@ def print_title(pos):
     # print(f"{term.home}{term.green_on_black}{term.clear}")
     print(f"{term.black_on_blue}")
     with term.location(0,0):
-        print(f" CROSSWORD {pos[0]},{pos[1]}")
+        print(f" CROSSWORD {pos[0]},{pos[1]}", end='')
     with term.location(0,term.height-1):
-        print(f" BOTTOM {pos[0]},{pos[1]}")
+        print(f" BOTTOM {pos[0]},{pos[1]}", end='')
 
 def print_everything(pos):
     print_title(pos)
@@ -242,12 +337,18 @@ def go():
                 if redraw_facing:
                     print_facing(old_pos, old_facing, term.green_on_black)
                     print_facing(pos, facing, term.white_on_black)
+                    print_word_suggestions( get_current_word(pos,facing) )
 
             elif val:
                 # print("got {0}.".format(val))
-                puz_data.solution[pos[1]*puz_data.width + pos[0]] = val
-                print(term.move_xy(DRAW_CROSSWORD_START[0] + pos[0]*5, DRAW_CROSSWORD_START[1]+ (pos[1]*2) +1), end='')
-                print(val)
+                #puz_data.solution[pos[1]*puz_data.width + pos[0]] = val
+                val = val.upper()
+                new_index = pos[1]*puz_data.width + pos[0]
+                puz_data.solution = puz_data.solution[:new_index] + val + puz_data.solution[new_index+1:]
+                # print_crossword() 
+                print(term.move_xy(DRAW_CROSSWORD_START[0] + pos[0]*4 + 2, DRAW_CROSSWORD_START[1]+ (pos[1]*2) +1), end='')
+                print(val, end='')
+                print_word_suggestions( get_current_word(pos,facing) )
         print(f'bye!{term.normal}')
 
 if __name__ == '__main__':
@@ -256,4 +357,5 @@ if __name__ == '__main__':
     else:
         puz_data = puz.read('Jan1821.puz')
     find_word_starts() 
+    load_big_word_list()
     go()
